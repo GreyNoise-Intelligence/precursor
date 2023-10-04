@@ -1,0 +1,5 @@
+(?<rundll_as_hex>.*\x72\x75\x6E\x64\x6C\x6C\x33\x32\x2E\x65\x78\x65.*)
+(?<univ_of_munich>.*\xc0\x1a\x1a\x1a\x1a\x08.*)
+(?<line_feed_carriage_returns>.*\x0D\x0A.*|.*\x0A.*)
+(?<weird_payload>.*\x0d\xb5\x54\x8a.*)
+(?<dev_sneaky>.*dev/(tcp|udp).*)

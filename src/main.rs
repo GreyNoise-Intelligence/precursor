@@ -3,14 +3,109 @@ use std::path::PathBuf;
 use clap::{Arg, Command, ArgMatches, ArgAction, value_parser};
 use pcre2::bytes::Regex;
 use serde_json::{from_str, to_string, Value, Map, Number};
-use tlsh2::Tlsh48_1;
+use tlsh2;
 use std::error::Error;
 use std::fmt;
 use base64::engine::Engine;
 use base64::engine::general_purpose::STANDARD;
+use rayon::prelude::*;
+use std::sync::Mutex;
+use dashmap::DashMap;
+
 
 // TODO
 // 1. Add docstrings with GPT
+// 2. Add optional stats output
+// 3. Add ability to specify output file so you can run w/ stats output
+// 4. Add ability to specify payload as base64, string, or binary input in stdin
+
+// Argument constants for CLI flags
+const TLSH: &str = "tlsh";
+const TLSH_ALGORITHM: &str = "tlsh-algorithm";
+const TLSH_DIFF: &str = "tlsh-diff";
+const TLSH_LENGTH: &str = "tlsh-length";
+const TLSH_DISTANCE: &str = "tlsh-distance";
+const INPUT_MODE: &str = "input-mode";
+const INPUT_JSON_KEY: &str = "input-json-key";
+const PATTERN_FILE: &str = "pattern-file";
+const PATTERN: &str = "pattern";
+const INPUT_JSON_KEY_BASE64: &str = "payload_b64";
+
+enum TlshHashInstance {
+    Tlsh48_1(tlsh2::Tlsh48_1),
+    Tlsh128_1(tlsh2::Tlsh128_1),
+    Tlsh128_3(tlsh2::Tlsh128_3),
+    Tlsh256_1(tlsh2::Tlsh256_1),
+    Tlsh256_3(tlsh2::Tlsh256_3),
+}
+
+
+enum TlshBuilderInstance {
+    Tlsh48_1(tlsh2::TlshBuilder48_1),
+    Tlsh128_1(tlsh2::TlshBuilder128_1),
+    Tlsh128_3(tlsh2::TlshBuilder128_3),
+    Tlsh256_1(tlsh2::TlshBuilder256_1),
+    Tlsh256_3(tlsh2::TlshBuilder256_3),
+}
+
+impl TlshHashInstance {
+    fn diff(&self, other: &Self, include_file_length: bool) -> i32 {
+        match (self, other) {
+            (TlshHashInstance::Tlsh48_1(hash1), TlshHashInstance::Tlsh48_1(hash2)) => {
+                hash1.diff(hash2, include_file_length)
+            }
+            (TlshHashInstance::Tlsh128_1(hash1), TlshHashInstance::Tlsh128_1(hash2)) => {
+                hash1.diff(hash2, include_file_length)
+            }
+            (TlshHashInstance::Tlsh128_3(hash1), TlshHashInstance::Tlsh128_3(hash2)) => {
+                hash1.diff(hash2, include_file_length)
+            }
+            (TlshHashInstance::Tlsh256_1(hash1), TlshHashInstance::Tlsh256_1(hash2)) => {
+                hash1.diff(hash2, include_file_length)
+            }
+            (TlshHashInstance::Tlsh256_3(hash1), TlshHashInstance::Tlsh256_3(hash2)) => {
+                hash1.diff(hash2, include_file_length)
+            }
+            _ => panic!("Incompatible hash types"),
+        }
+    }
+
+    fn hash(&self) -> Vec<u8> {
+        match self {
+            TlshHashInstance::Tlsh48_1(hash) => hash.hash().to_vec(),
+            TlshHashInstance::Tlsh128_1(hash) => hash.hash().to_vec(),
+            TlshHashInstance::Tlsh128_3(hash) => hash.hash().to_vec(),
+            TlshHashInstance::Tlsh256_1(hash) => hash.hash().to_vec(),
+            TlshHashInstance::Tlsh256_3(hash) => hash.hash().to_vec(),
+        }
+    }
+}
+
+
+
+
+impl TlshBuilderInstance {
+    fn update(&mut self, data: &[u8]) {
+        match self {
+            TlshBuilderInstance::Tlsh48_1(builder) => builder.update(data),
+            TlshBuilderInstance::Tlsh128_1(builder) => builder.update(data),
+            TlshBuilderInstance::Tlsh128_3(builder) => builder.update(data),
+            TlshBuilderInstance::Tlsh256_1(builder) => builder.update(data),
+            TlshBuilderInstance::Tlsh256_3(builder) => builder.update(data),
+        }
+    }
+
+    fn build(self) ->Option<TlshHashInstance> {
+        match self {
+            TlshBuilderInstance::Tlsh48_1(builder) => builder.build().map(TlshHashInstance::Tlsh48_1),
+            TlshBuilderInstance::Tlsh128_1(builder) => builder.build().map(TlshHashInstance::Tlsh128_1),
+            TlshBuilderInstance::Tlsh128_3(builder) => builder.build().map(TlshHashInstance::Tlsh128_3),
+            TlshBuilderInstance::Tlsh256_1(builder) => builder.build().map(TlshHashInstance::Tlsh256_1),
+            TlshBuilderInstance::Tlsh256_3(builder) => builder.build().map(TlshHashInstance::Tlsh256_3),
+        }
+    }
+}
+
 
 #[derive(Debug)]
 struct TlshCalculationError {
@@ -27,13 +122,14 @@ impl Error for TlshCalculationError {}
 
 fn main() {
     // Create a list to store tlsh::Tlsh objects
-    let mut tlsh_list: Vec<Tlsh48_1> = Vec::new();
+    let tlsh_list: Vec<TlshHashInstance> = Vec::new();
 
     // Create map store payload reports by sha256_sum
-    let mut payload_reports = Map::new();
+    let payload_reports = Map::new();
 
-     // Create map store to store tlsh_reports by tlsh
-     let mut tlsh_reports = Map::new();
+    // Create map store to store tlsh_reports by tlsh
+    let tlsh_reports: DashMap<String, Value> = DashMap::new();
+    //let tlsh_reports = Map::new();
 
     // Create a clap::ArgMatches object to store the CLI arguments
     let args = Command::new("precursor")
@@ -41,74 +137,104 @@ fn main() {
                Precursor takes JSONLINES from STDIN and outputs JSON on STDOUT.]\n\
                A PCRE2 patternfile to be passed as the last argument and must contain only one capturegroup per line.\n\
                The JSONLINES must contain a `payload` key or be overridden with the --payload-key flag.")
-        .arg(Arg::new("file")
-            .help("File to search in")
-            .required(true)
+        .arg(Arg::new(PATTERN)
+            .short('p')
+            .long(PATTERN)
+            .help("Specify the PCRE2 pattern to be used, it must contain a single named capture group.")
+            .required(false)
             .index(1))
-        .arg(Arg::new("tlsh")
+        .arg(Arg::new(PATTERN_FILE)
+            .short('f')
+            .long(PATTERN_FILE)
+            .help("Specify the path to the file containing PCRE2 patterns, one per line, each must contain a single named capture group.")
+            .action(ArgAction::Set))
+        .arg(Arg::new(TLSH)
             .short('t')
-            .long("tlsh")
-            .help("Calculate payload tlsh values using 48 buckets and a 1 byte checksum.")
+            .long(TLSH)
+            .help("Calculate payload tlsh hash of the input payloads.")
             .action(ArgAction::SetTrue))
-        .arg(Arg::new("tlshdiff")
+        .arg(Arg::new(TLSH_ALGORITHM)
+            .short('a')
+            .long(TLSH_ALGORITHM)
+            .help("Specify the TLSH algorithm to use. The algorithms specify the bucket size in bytes and the checksum length in bits.")
+            .value_parser(["128_1", "128_3", "256_1", "256_3", "48_1"])
+            .action(ArgAction::Set)
+            .default_value("48_1"))
+        .arg(Arg::new(TLSH_DIFF)
             .short('d')
-            .long("tlsh-diff")
-            .help("Measure the distance between a payload and every other payload of only the payloads that pass the PCRE2 pattern matching.")
+            .long(TLSH_DIFF)
+            .help("Measure the distance between a payload and every other payload that passed through the the PCRE2 patterns.")
             .action(ArgAction::SetTrue))
-        .arg(Arg::new("tlshthreshold")
-            .short('t')
-            .long("tlsh-threshold")
+        .arg(Arg::new(TLSH_DISTANCE)
+            .short('x')
+            .long(TLSH_DISTANCE)
             .value_parser(value_parser!(i32))
             .help("Specify the TLSH distance threshold for a match.")
             .action(ArgAction::Set)
             .default_value("100"))
-        .arg(Arg::new("tlshlength")
+        .arg(Arg::new(TLSH_LENGTH)
             .short('l')
-            .long("tlsh-length")
+            .long(TLSH_LENGTH)
             .help("This uses a TLSH algorithm that considered the payload length.")
             .action(ArgAction::SetTrue))
-        .arg(Arg::new("payload-key")
-            .short('p')
-            .long("payload-key")
-            .help("Specify the key for the JSON STDIN value")
+        .arg(Arg::new(INPUT_MODE)
+            .short('m')
+            .long(INPUT_MODE)
+            .help("Specify the payload mode as base64, string, or binary for stdin.")
             .action(ArgAction::Set)
-            .default_value("payload_b64"))
+            .default_value("base64"))
+        .arg(Arg::new(INPUT_JSON_KEY)
+            .short('k')
+            .long(INPUT_JSON_KEY)
+            .help("Specify the key for the JSON STDIN value that contains the payload.")
+            .action(ArgAction::Set)
+            .default_value(INPUT_JSON_KEY_BASE64))
         .get_matches();
 
-    let pattern_file = PathBuf::from(args.get_one::<String>("file").unwrap());
+    let pattern_file = PathBuf::from(args.get_one::<String>(PATTERN_FILE).unwrap());
     let patterns: Vec<String> = read_patterns(Some(pattern_file));
     let stdin = io::stdin();
-    let mut handle = stdin.lock();
-    let mut line = String::new();
-    while let Ok(bytes_read) = handle.read_line(&mut line) {
-        if bytes_read == 0 {
-            break;
-        }
-        let line_json: Value = from_str(&line).unwrap();
-        handle_line(&line_json, &patterns, &args, &mut tlsh_list, &mut payload_reports);
 
-        line.clear();
+    let tlsh_list = Mutex::new(tlsh_list);
+    let payload_reports = Mutex::new(payload_reports);
+    //let tlsh_reports  = Mutex::new(tlsh_reports);
+    stdin
+        .lock()
+        .lines()
+        .filter_map(Result::ok)
+        .collect::<Vec<String>>()
+        .par_iter()
+        .for_each(|line| {
+            let line_json: Value = from_str(&line).unwrap();
+            handle_line(
+                &line_json,
+                &patterns,
+                &args,
+                &tlsh_list,
+                &payload_reports,
+            );
+        });
+
+    if args.get_flag(TLSH_DIFF) {
+        run_hash_diffs(&tlsh_list, &args, &tlsh_reports);
     }
 
-    if args.get_flag("tlshdiff") {
-        run_hash_diffs(tlsh_list, &args, &mut tlsh_reports);
-    }
 
-
-    generate_reports(&mut tlsh_reports, &mut payload_reports)
+    generate_reports(&tlsh_reports, &payload_reports, &args)
 
     
 }
 
-fn generate_reports(tlsh_reports: &mut Map<String, Value>, payload_reports: &mut Map<String, Value>){
-    for (_sha256_sum, report) in payload_reports.iter() {
-        if report["tlsh"] != "" {
+fn generate_reports(tlsh_reports: &DashMap<String, Value>, payload_reports: &Mutex<Map<String, Value>>, args: &ArgMatches) {
+    for (_sha256_sum, report) in payload_reports.lock().unwrap().iter() {
+        if report["tlsh"] != "" && args.get_flag(TLSH_DIFF) {
             let mut report_clone = report.clone();
             let tlsh_hash = report["tlsh"].as_str();
-            if tlsh_hash != None {
-                let tlsh_similarites = tlsh_reports.get(tlsh_hash.unwrap()).unwrap();
-                report_clone["tlsh_similarities"] = tlsh_similarites.clone();
-                println!("{}", to_string(&report_clone).unwrap());
+            if let Some(tlsh_hash) = tlsh_hash {
+                if let Some(tlsh_similarities) = tlsh_reports.get(tlsh_hash) {
+                    report_clone["tlsh_similarities"] = tlsh_similarities.value().clone();
+                    println!("{}", to_string(&report_clone).unwrap());
+                }
             }
         } else {
             println!("{}", to_string(&report).unwrap());
@@ -116,30 +242,25 @@ fn generate_reports(tlsh_reports: &mut Map<String, Value>, payload_reports: &mut
     }
 }
 
-fn run_hash_diffs(tlsh_list: Vec<tlsh2::Tlsh<1, 32, 12>>, args: &ArgMatches, tlsh_reports: &mut Map<String, Value>) {
-    for i in 0..tlsh_list.len() {
-        // Create new Map for TLSH report diffs
+fn run_hash_diffs(tlsh_list: &Mutex<Vec<TlshHashInstance>>, args: &ArgMatches, tlsh_reports: &DashMap<String, Value>) {
+
+    let tlsh_list_guard = tlsh_list.lock().unwrap();
+    tlsh_list_guard.par_iter().enumerate().for_each(|(i, tlsh_i)| {
         let mut local_tlsh_map = Map::new();
-        for j in (i + 1)..tlsh_list.len() {
-            if let (Some(tlsh_i), Some(tlsh_j)) = (tlsh_list.get(i), tlsh_list.get(j)) {
-                let include_file_length_in_calculation = args.get_flag("tlshlength");
-                let diff = tlsh_i.diff(tlsh_j, include_file_length_in_calculation);
-                if diff > *args.get_one("tlshthreshold").unwrap() {
-                    let tlsh_hash_lowercase = tlsh_j.hash().to_ascii_lowercase();
-                    let tlsh_hash_string = String::from_utf8(tlsh_hash_lowercase);
-                    let diff_number: Number = diff.into();
-                    local_tlsh_map.insert(tlsh_hash_string.unwrap(), Value::Number(diff_number));                    
-                } 
-            } else {
-                println!("Failed to calculate TLSH diff due to index out of bounds.");
+        for (_j, tlsh_j) in tlsh_list_guard.iter().enumerate().skip(i + 1) {
+            let include_file_length_in_calculation = args.get_flag(TLSH_LENGTH);
+            let diff = tlsh_i.diff(tlsh_j, include_file_length_in_calculation);
+            if diff > *args.get_one(TLSH_DISTANCE).unwrap() {
+                let tlsh_hash_lowercase = tlsh_j.hash().to_ascii_lowercase();
+                let tlsh_hash_string = String::from_utf8(tlsh_hash_lowercase);
+                let diff_number: Number = diff.into();
+                local_tlsh_map.insert(tlsh_hash_string.unwrap(), Value::Number(diff_number));
             }
         }
-        if let Some(base_tlsh) = tlsh_list.get(i){
-            let tlsh_hash_lowercase = base_tlsh.hash().to_ascii_lowercase();
-            let tlsh_hash_string = String::from_utf8(tlsh_hash_lowercase);
-            tlsh_reports.insert(tlsh_hash_string.unwrap(),  Value::Object(local_tlsh_map));
-        }
-    }
+        let tlsh_hash_lowercase = tlsh_i.hash().to_ascii_lowercase();
+        let tlsh_hash_string = String::from_utf8(tlsh_hash_lowercase);
+        tlsh_reports.insert(tlsh_hash_string.unwrap(), Value::Object(local_tlsh_map));
+    });
 }
 
 fn read_patterns(pattern_file: Option<PathBuf>) -> Vec<String> {
@@ -154,13 +275,21 @@ fn read_patterns(pattern_file: Option<PathBuf>) -> Vec<String> {
     patterns
 }
 
-fn calculate_tlsh_hash(payload: &[u8]) -> Result<tlsh2::Tlsh48_1, TlshCalculationError> {
+fn calculate_tlsh_hash(payload: &[u8], args: &ArgMatches) -> Result<TlshHashInstance, TlshCalculationError> {
     if payload.len() < 49 {
         return Err(TlshCalculationError {
             message: "Payload must be at least 48 bytes".to_owned(),
         });
     }
-    let mut builder = tlsh2::TlshBuilder48_1::new();
+    let tlsh_algorithm = args.get_one::<String>(TLSH_ALGORITHM).unwrap();
+    let mut builder: TlshBuilderInstance = match tlsh_algorithm.as_str() {
+        "48_1" => TlshBuilderInstance::Tlsh48_1(tlsh2::TlshBuilder48_1::new()),
+        "128_1" => TlshBuilderInstance::Tlsh128_1(tlsh2::TlshBuilder128_1::new()),
+        "128_3" => TlshBuilderInstance::Tlsh128_3(tlsh2::TlshBuilder128_3::new()),
+        "256_1" => TlshBuilderInstance::Tlsh256_1(tlsh2::TlshBuilder256_1::new()),
+        "256_3" => TlshBuilderInstance::Tlsh256_3(tlsh2::TlshBuilder256_3::new()),
+        _ => TlshBuilderInstance::Tlsh48_1(tlsh2::TlshBuilder48_1::new()),
+    };
     builder.update(payload);
     if let Some(tlsh_hash) = builder.build() {
         Ok(tlsh_hash)
@@ -173,46 +302,47 @@ fn calculate_tlsh_hash(payload: &[u8]) -> Result<tlsh2::Tlsh48_1, TlshCalculatio
 }
 
 
-fn handle_line(json_line: &Value, patterns: &[String], args: &ArgMatches, tlsh_list: &mut Vec<Tlsh48_1>, payload_reports: &mut Map<String, Value>) {
-    if let Some(payload_key) = args.get_one::<String>("payload-key") {
+fn handle_line(json_line: &Value, 
+               patterns: &[String], 
+               args: &ArgMatches, 
+               tlsh_list: &Mutex<Vec<TlshHashInstance>>,
+               payload_reports: &Mutex<Map<String, Value>>,) {
+    if let Some(payload_key) = args.get_one::<String>(INPUT_JSON_KEY) {
         
         let payloadb64: &str = json_line[payload_key].as_str().unwrap();
         let payload = STANDARD.decode(payloadb64).unwrap();
 
-        let mut matched_capture_groups = Value::Array(Vec::new());
+        let matched_capture_groups = Value::Array(Vec::new());
 
-        let mut match_exists: bool = false;
-
-        for pattern in patterns {
-            let re = Regex::new(&pattern).unwrap();
-            for res in re.captures_iter(payload.as_slice()) {
-                let caps = res.unwrap();
-                for name in re.capture_names() {
-                    if let Some(name) = name {
-                        if let Some(_pattern_match) = caps.name(name) {
-                            // Add matched capture group names to the to a JSON Value array 
-                            // So they can be appended to the payload record
-
-                            // NOTE: We may wish to output the matching bytes to an array 
-                            // in a scenario where we want a ripgrep like --only-matches.
-                            match_exists = true;
-                            matched_capture_groups.as_array_mut().unwrap().push(Value::String(name.to_string()));
+        let match_exists = patterns
+            .par_iter()
+            .map(|pattern| {
+                let re = Regex::new(&pattern).unwrap();
+                re.captures_iter(payload.as_slice())
+                    .filter_map(|res| res.ok())
+                    .any(|caps| {
+                        for name in re.capture_names() {
+                            if let Some(name) = name {
+                                if caps.name(name).is_some() {
+                                    return true;
+                                }
+                            }
                         }
-                    }
-                }
-            }
-        }
+                        false
+                    })
+            })
+            .any(|result| result);
 
         let mut json_tlsh_hash: Value = Value::String(String::new());
         if match_exists {
             // We only calculate TLSH hashes and push to the global TLSH list 
             // If the payload passes the pattern_match gate
             // This helps us acchieve a massive reduction in work for TLSH computation
-            if args.get_flag("tlsh") || args.get_flag("tlshdiff") || args.get_flag("tlshlength") {
-                match calculate_tlsh_hash(payload.as_slice()) {
+            if args.get_flag(TLSH) || args.get_flag(TLSH_DIFF) || args.get_flag(TLSH_LENGTH) {
+                match calculate_tlsh_hash(payload.as_slice(), &args) {
                     Ok(hash) => {
                         let cloned_hash = hash.hash().clone();
-                        tlsh_list.push(hash);
+                        tlsh_list.lock().unwrap().push(hash);
                         let tlsh_hash_lowercase = cloned_hash.to_ascii_lowercase();
                         let tlsh_hash_string = String::from_utf8(tlsh_hash_lowercase);
                         json_tlsh_hash = Value::String(tlsh_hash_string.unwrap());
@@ -236,7 +366,7 @@ fn handle_line(json_line: &Value, patterns: &[String], args: &ArgMatches, tlsh_l
             }
             json_clone["tags"] = matched_capture_groups;
             let sha256_sum: &str = json_line["sha256_sum"].as_str().unwrap();
-            payload_reports.insert(sha256_sum.to_string(), json_clone);
+            payload_reports.lock().unwrap().insert(sha256_sum.to_string(), json_clone);
         }
         
     } else {
