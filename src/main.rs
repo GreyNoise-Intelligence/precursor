@@ -1,5 +1,6 @@
 use std::io::{self, BufRead};
 use std::path::PathBuf;
+use clap::builder::PathBufValueParser;
 use clap::{Arg, Command, ArgMatches, ArgAction, value_parser};
 use pcre2::bytes::Regex;
 use serde_json::{from_str, to_string, Value, Map, Number};
@@ -38,7 +39,6 @@ enum TlshHashInstance {
     Tlsh256_1(tlsh2::Tlsh256_1),
     Tlsh256_3(tlsh2::Tlsh256_3),
 }
-
 
 enum TlshBuilderInstance {
     Tlsh48_1(tlsh2::TlshBuilder48_1),
@@ -80,8 +80,6 @@ impl TlshHashInstance {
         }
     }
 }
-
-
 
 
 impl TlshBuilderInstance {
@@ -129,7 +127,6 @@ fn main() {
 
     // Create map store to store tlsh_reports by tlsh
     let tlsh_reports: DashMap<String, Value> = DashMap::new();
-    //let tlsh_reports = Map::new();
 
     // Create a clap::ArgMatches object to store the CLI arguments
     let args = Command::new("precursor")
@@ -138,14 +135,13 @@ fn main() {
                A PCRE2 patternfile to be passed as the last argument and must contain only one capturegroup per line.\n\
                The JSONLINES must contain a `payload` key or be overridden with the --payload-key flag.")
         .arg(Arg::new(PATTERN)
-            .short('p')
-            .long(PATTERN)
             .help("Specify the PCRE2 pattern to be used, it must contain a single named capture group.")
             .required(false)
             .index(1))
         .arg(Arg::new(PATTERN_FILE)
             .short('f')
             .long(PATTERN_FILE)
+            .value_parser(PathBufValueParser::new())
             .help("Specify the path to the file containing PCRE2 patterns, one per line, each must contain a single named capture group.")
             .action(ArgAction::Set))
         .arg(Arg::new(TLSH)
@@ -191,13 +187,11 @@ fn main() {
             .default_value(INPUT_JSON_KEY_BASE64))
         .get_matches();
 
-    let pattern_file = PathBuf::from(args.get_one::<String>(PATTERN_FILE).unwrap());
+    let pattern_file = args.get_one::<std::path::PathBuf>(PATTERN_FILE).unwrap();
     let patterns: Vec<String> = read_patterns(Some(pattern_file));
     let stdin = io::stdin();
-
     let tlsh_list = Mutex::new(tlsh_list);
     let payload_reports = Mutex::new(payload_reports);
-    //let tlsh_reports  = Mutex::new(tlsh_reports);
     stdin
         .lock()
         .lines()
@@ -263,7 +257,7 @@ fn run_hash_diffs(tlsh_list: &Mutex<Vec<TlshHashInstance>>, args: &ArgMatches, t
     });
 }
 
-fn read_patterns(pattern_file: Option<PathBuf>) -> Vec<String> {
+fn read_patterns(pattern_file: Option<&PathBuf>) -> Vec<String> {
     let mut patterns = Vec::new();
     if let Some(path) = pattern_file {
         let file_contents = std::fs::read_to_string(path).unwrap();
