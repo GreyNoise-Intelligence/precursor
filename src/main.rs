@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use clap::builder::PathBufValueParser;
 use clap::{Arg, Command, ArgMatches, ArgAction, value_parser};
 use pcre2::bytes::Regex;
-use serde_json::{from_str, to_string, Value, Map, Number};
+use serde_json::{from_str, to_string, Value, Map, Number, json};
 use tlsh2;
 use std::error::Error;
 use std::fmt;
@@ -12,21 +12,30 @@ use base64::engine::general_purpose::STANDARD;
 use rayon::prelude::*;
 use std::sync::Mutex;
 use dashmap::DashMap;
+use std::sync::Arc;
+use atomic_counter::{AtomicCounter, ConsistentCounter};
+use std::time::Instant;
+use std::io::Write;
+
 
 
 // TODO
 // 1. Add docstrings with GPT
 // 2. Add optional stats output
 // 3. Add ability to specify output file so you can run w/ stats output
-// 4. Add ability to specify payload as base64, string, or binary input in stdin
+// 5. Add the ability support a folder of PATTERN_FILES
 
 // Argument constants for CLI flags
+const STATS: &str = "stats";
 const TLSH: &str = "tlsh";
 const TLSH_ALGORITHM: &str = "tlsh-algorithm";
 const TLSH_DIFF: &str = "tlsh-diff";
 const TLSH_LENGTH: &str = "tlsh-length";
 const TLSH_DISTANCE: &str = "tlsh-distance";
 const INPUT_MODE: &str = "input-mode";
+const INPUT_MODE_BASE64: &str = "base64";
+const INPUT_MODE_STRING: &str = "string";
+const INPUT_MODE_BINARY: &str = "binary";
 const INPUT_JSON_KEY: &str = "input-json-key";
 const PATTERN_FILE: &str = "pattern-file";
 const PATTERN: &str = "pattern";
@@ -119,6 +128,15 @@ impl fmt::Display for TlshCalculationError {
 impl Error for TlshCalculationError {}
 
 fn main() {
+    // Start execution timer 
+    let start = Instant::now();
+    
+    // Stats Counters
+    let counter_inputs = Arc::new(ConsistentCounter::new(0));
+    let counter_pcre_patterns = Arc::new(ConsistentCounter::new(0));
+    let counter_pcre_matches = Arc::new(ConsistentCounter::new(0));
+    let counter_tlsh_hashes = Arc::new(ConsistentCounter::new(0));
+    
     // Create a list to store tlsh::Tlsh objects
     let tlsh_list: Vec<TlshHashInstance> = Vec::new();
 
@@ -177,21 +195,46 @@ fn main() {
             .short('m')
             .long(INPUT_MODE)
             .help("Specify the payload mode as base64, string, or binary for stdin.")
+            .value_parser([INPUT_MODE_BASE64, INPUT_MODE_STRING, INPUT_MODE_BINARY])
             .action(ArgAction::Set)
             .default_value("base64"))
         .arg(Arg::new(INPUT_JSON_KEY)
-            .short('k')
+            .short('j')
             .long(INPUT_JSON_KEY)
             .help("Specify the key for the JSON STDIN value that contains the payload.")
             .action(ArgAction::Set)
             .default_value(INPUT_JSON_KEY_BASE64))
+        .arg(Arg::new(STATS)
+            .short('s')
+            .long(STATS)
+            .help("Output statistics report.")
+            .action(ArgAction::SetTrue))
         .get_matches();
 
-    let pattern_file = args.get_one::<std::path::PathBuf>(PATTERN_FILE).unwrap();
-    let patterns: Vec<String> = read_patterns(Some(pattern_file));
-    let stdin = io::stdin();
+    if args.contains_id(INPUT_JSON_KEY) {
+        if args.contains_id(INPUT_MODE) {
+            let input_mode = args.get_one::<String>(INPUT_MODE).unwrap();
+            if input_mode == INPUT_MODE_BINARY {
+                panic!("-j / --input-json-key is not compatible with -m / --input-mode binary, please use base64 or string instead."); 
+        }
+    }}
+
     let tlsh_list = Mutex::new(tlsh_list);
     let payload_reports = Mutex::new(payload_reports);
+    let stdin = io::stdin();
+
+    #[allow(unused_assignments)] // This is valid because of the rayon usesage via the par_iter() method
+    let mut patterns: Vec<String> = Vec::new();
+    if args.contains_id(PATTERN_FILE) {
+        let pattern_file = args.get_one::<std::path::PathBuf>(PATTERN_FILE).unwrap();
+        patterns = read_patterns(Some(pattern_file));
+    } else {
+        let pattern = args.get_one::<String>(PATTERN).unwrap();
+        patterns = vec![pattern.to_string()];
+    }
+
+    counter_pcre_patterns.add(patterns.len());
+
     stdin
         .lock()
         .lines()
@@ -200,12 +243,15 @@ fn main() {
         .par_iter()
         .for_each(|line| {
             let line_json: Value = from_str(&line).unwrap();
+            counter_inputs.inc();
             handle_line(
                 &line_json,
                 &patterns,
                 &args,
                 &tlsh_list,
                 &payload_reports,
+                &counter_pcre_matches,
+                &counter_tlsh_hashes,
             );
         });
 
@@ -214,9 +260,30 @@ fn main() {
     }
 
 
-    generate_reports(&tlsh_reports, &payload_reports, &args)
+    generate_reports(&tlsh_reports, &payload_reports, &args);
 
-    
+    if args.get_flag(STATS){
+        let end = Instant::now();
+        let duration = end.duration_since(start);
+        let duration_in_seconds = duration.as_secs_f32();
+        let formated_duration: String = format!("{:.2}", duration_in_seconds);
+
+        // Create a JSON object for the stats
+        let stats = json!({
+            "PCRE2": {"Patterns": counter_pcre_patterns.get(), "Matches": counter_pcre_matches.get(), "Unique": payload_reports.lock().unwrap().len(),},
+            "RuntimeSeconds": formated_duration,
+            "Inputs": {"Total": counter_inputs.get(), 
+            "TLSH": {"Hashes": counter_tlsh_hashes.get(),},},
+        });
+
+        // Serialize the JSON object as a pretty-printed String
+        let pretty_json = serde_json::to_string_pretty(&stats)
+        .expect("Error converting JSON object to pretty-printed String");
+
+        // Print the pretty-printed JSON to STDERR
+        let mut stderr = std::io::stderr();
+        writeln!(&mut stderr, "{}", pretty_json).expect("Error printing JSON to STDERR");
+    }
 }
 
 fn generate_reports(tlsh_reports: &DashMap<String, Value>, payload_reports: &Mutex<Map<String, Value>>, args: &ArgMatches) {
@@ -296,15 +363,31 @@ fn calculate_tlsh_hash(payload: &[u8], args: &ArgMatches) -> Result<TlshHashInst
 }
 
 
-fn handle_line(json_line: &Value, 
+fn  handle_line(json_line: &Value, 
                patterns: &[String], 
                args: &ArgMatches, 
                tlsh_list: &Mutex<Vec<TlshHashInstance>>,
-               payload_reports: &Mutex<Map<String, Value>>,) {
+               payload_reports: &Mutex<Map<String, Value>>,
+               counter_pcre_matches: &Arc<ConsistentCounter>,
+               counter_tlsh_hashes: &Arc<ConsistentCounter>,
+            ) {
     if let Some(payload_key) = args.get_one::<String>(INPUT_JSON_KEY) {
-        
-        let payloadb64: &str = json_line[payload_key].as_str().unwrap();
-        let payload = STANDARD.decode(payloadb64).unwrap();
+        #[allow(unused_assignments)] // this is used below
+        let mut payload: Vec<u8> = Vec::new();
+        if args.contains_id(INPUT_MODE) {
+            let input_mode = args.get_one::<String>(INPUT_MODE).unwrap();
+            if input_mode == "base64" {
+                let payloadb64: &str = json_line[payload_key].as_str().unwrap();
+                payload = STANDARD.decode(payloadb64).unwrap();
+            } else if input_mode == "string" {
+                payload = json_line[payload_key].as_str().unwrap().as_bytes().to_vec();
+            } else {
+                panic!("{} not supported with -j / --input-json-key", input_mode);
+            } 
+        } else {
+            let payloadb64: &str = json_line[payload_key].as_str().unwrap();
+            payload = STANDARD.decode(payloadb64).unwrap();
+        }
 
         let matched_capture_groups = Value::Array(Vec::new());
 
@@ -316,6 +399,7 @@ fn handle_line(json_line: &Value,
                     .filter_map(|res| res.ok())
                     .any(|caps| {
                         for name in re.capture_names() {
+                            counter_pcre_matches.inc();
                             if let Some(name) = name {
                                 if caps.name(name).is_some() {
                                     return true;
@@ -335,6 +419,7 @@ fn handle_line(json_line: &Value,
             if args.get_flag(TLSH) || args.get_flag(TLSH_DIFF) || args.get_flag(TLSH_LENGTH) {
                 match calculate_tlsh_hash(payload.as_slice(), &args) {
                     Ok(hash) => {
+                        counter_tlsh_hashes.inc();
                         let cloned_hash = hash.hash().clone();
                         tlsh_list.lock().unwrap().push(hash);
                         let tlsh_hash_lowercase = cloned_hash.to_ascii_lowercase();
