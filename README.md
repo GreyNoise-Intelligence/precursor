@@ -1,3 +1,5 @@
+# THIS IS UNDER CONSTRUCTION IGNORE ALL GROSS STUFFS
+
 # precursor
 
 `precursor` is a command-line tool for searching files and directories using regular expressions. It supports searching against a rules file with named rules/patterns and outputting each match with both the name of the rule and the matched bytes. It also supports searching against a single pattern in the named format and optionally reading from STDIN for the input to search against. Additionally, it can output matches in JSON format and optionally summarize the matches by rule name and count.
