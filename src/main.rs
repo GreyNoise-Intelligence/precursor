@@ -29,7 +29,7 @@ const TLSH_SIM_ONLY: &str = "tlsh-sim-only";
 const INPUT_MODE: &str = "input-mode";
 const INPUT_MODE_BASE64: &str = "base64";
 const INPUT_MODE_STRING: &str = "string";
-const INPUT_MODE_BINARY: &str = "binary";
+const INPUT_MODE_HEX: &str = "hex";
 const INPUT_JSON_KEY: &str = "input-json-key";
 const PATTERN_FILE: &str = "pattern-file";
 const PATTERN: &str = "pattern";
@@ -145,7 +145,7 @@ fn main() {
 
     // Create a clap::ArgMatches object to store the CLI arguments
     let cmd = Command::new("precursor")
-    .about("Precursor is a regex (PCRE2) and locality sensitive hasing (TLSH) tool for labeling and finding similairites between text, binary, or base64 encoded data.")
+    .about("Precursor is a regex (PCRE2) and locality sensitive hasing (TLSH) tool for labeling and finding similairites between text, hex, or base64 encoded data.")
     .color(ColorChoice::Auto)
     .long_about("Precursor currently supports the following TLSH algorithms:\n
                   1. Tlsh48_1\n
@@ -202,8 +202,8 @@ fn main() {
     .arg(Arg::new(INPUT_MODE)
         .short('m')
         .long(INPUT_MODE)
-        .help("Specify the payload mode as base64, string, or binary for stdin.")
-        .value_parser([INPUT_MODE_BASE64, INPUT_MODE_STRING, INPUT_MODE_BINARY])
+        .help("Specify the payload mode as base64, string, or hex for stdin.")
+        .value_parser([INPUT_MODE_BASE64, INPUT_MODE_STRING, INPUT_MODE_HEX])
         .action(ArgAction::Set)
         .default_value("base64"))
     .arg(Arg::new(INPUT_JSON_KEY)
@@ -218,14 +218,6 @@ fn main() {
         .action(ArgAction::SetTrue));
 
     let args = cmd.get_matches();
-
-    if args.contains_id(INPUT_JSON_KEY) {
-        if args.contains_id(INPUT_MODE) {
-            let input_mode = args.get_one::<String>(INPUT_MODE).unwrap();
-            if input_mode == INPUT_MODE_BINARY {
-                panic!("-j / --input-json-key is not compatible with -m / --input-mode binary, please use base64 or string instead."); 
-        }
-    }}
 
     let tlsh_list = Mutex::new(tlsh_list);
     let payload_reports = Mutex::new(payload_reports);
@@ -488,8 +480,11 @@ fn  handle_line(line: &String,
                 payload = STANDARD.decode(payloadb64).unwrap();
             } else if input_mode == "string" {
                 payload = line_json[payload_key].as_str().unwrap().as_bytes().to_vec();
+            } else if input_mode == "hex" {
+                let payloadhex: &str = line_json[payload_key].as_str().unwrap();
+                payload = hex::decode(payloadhex).unwrap();
             } else {
-                panic!("{} not supported with -j / --input-json-key", input_mode);
+                panic!("{} not a supported input mode.", input_mode);
             } 
         } else {
             let payloadb64: &str = line_json[payload_key].as_str().unwrap();
@@ -504,8 +499,11 @@ fn  handle_line(line: &String,
                 payload = STANDARD.decode(payloadb64).unwrap();
             } else if input_mode == "string" {
                 payload = line.as_bytes().to_vec();
+            } else if input_mode == "hex" {
+                let payloadhex: &str = line;
+                payload = hex::decode(payloadhex).unwrap();
             } else {
-                panic!("{} not supported with -j / --input-json-key", input_mode);
+                panic!("{} not a supported input mode.", input_mode);
             } 
         } else {
             let payloadb64: &str = line;
@@ -565,23 +563,27 @@ fn  handle_line(line: &String,
         /*
         Create JSON output for payload only when match exists
         */
+
+        #[allow(unused_assignments)]
+        let mut json_clone = Value::Null;
         if args.contains_id(INPUT_JSON_KEY){
             // WARNING: This logic should probably move up so we don't have to parse the input
             // JSON twice from the line. 
             let line_json: Value = from_str(&line).unwrap();
-            let mut json_clone = line_json.clone();
-            let json_tlsh_hash_clone  = json_tlsh_hash.clone();
-            if json_tlsh_hash_clone.as_str() == None {
-                json_clone["tlsh"] = Value::String(String::new());
-            } else {
-                json_clone["tlsh"] = json_tlsh_hash.clone();
-            }
-            json_clone["tags"] = matched_capture_groups.lock().unwrap().clone();
-            
-            // This is where we insert the finished per-payload report
-            payload_reports.lock().unwrap().insert(sha256_sum, json_clone);
+            json_clone = line_json.clone();
         } else {
             //let json_tlsh_hash_clone  = json_tlsh_hash.clone();
+            json_clone = Value::Object(Map::new());
         }
+
+        let json_tlsh_hash_clone  = json_tlsh_hash.clone();
+        if json_tlsh_hash_clone.as_str() == None {
+            json_clone["tlsh"] = Value::String(String::new());
+        } else {
+            json_clone["tlsh"] = json_tlsh_hash.clone();
+        }
+        json_clone["tags"] = matched_capture_groups.lock().unwrap().clone();
+         // This is where we insert the finished per-payload report
+         payload_reports.lock().unwrap().insert(sha256_sum, json_clone);
     }
 }
