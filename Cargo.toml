@@ -23,3 +23,6 @@ path = "src/main.rs"
 
 [profile.release]
 debug = false
+
+[build-dependencies]
+clap_mangen = "0.2.14"
