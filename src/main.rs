@@ -325,8 +325,10 @@ fn main() {
                         "MinDistance": *min_tlsh_distance,
                         "MaxDistance": *max_tlsh_distance,
                         "P95Distance": p95_tlsh_distance,},
-            "Performance": {
+            "Runtime": {
+                        "Version": env!("CARGO_PKG_VERSION"),
                         "DurationSeconds": formated_duration,
+                        "Mode": args.get_one::<String>(INPUT_MODE).unwrap(),
             },
             }
         );
