@@ -15,6 +15,8 @@ use dashmap::DashMap;
 use atomic_counter::{AtomicCounter, ConsistentCounter};
 use std::time::Instant;
 use std::io::Write;
+use sha2::{Sha256, Digest};
+use hex;
 
 // Argument constants for CLI flags
 const STATS: &str = "stats";
@@ -23,6 +25,7 @@ const TLSH_ALGORITHM: &str = "tlsh-algorithm";
 const TLSH_DIFF: &str = "tlsh-diff";
 const TLSH_LENGTH: &str = "tlsh-length";
 const TLSH_DISTANCE: &str = "tlsh-distance";
+const TLSH_SIM_ONLY: &str = "tlsh-sim-only";
 const INPUT_MODE: &str = "input-mode";
 const INPUT_MODE_BASE64: &str = "base64";
 const INPUT_MODE_STRING: &str = "string";
@@ -30,7 +33,6 @@ const INPUT_MODE_BINARY: &str = "binary";
 const INPUT_JSON_KEY: &str = "input-json-key";
 const PATTERN_FILE: &str = "pattern-file";
 const PATTERN: &str = "pattern";
-const INPUT_JSON_KEY_BASE64: &str = "payload_b64";
 
 enum TlshHashInstance {
     Tlsh48_1(tlsh2::Tlsh48_1),
@@ -128,7 +130,8 @@ fn main() {
     let counter_pcre_matches = Arc::new(ConsistentCounter::new(0));
     let counter_tlsh_hashes = Arc::new(ConsistentCounter::new(0));
     let counter_tlsh_similarites = Arc::new(ConsistentCounter::new(0));
-    let vec_payload_size: Arc<Mutex<Vec<i32>>> = Arc::new(Mutex::new(Vec::new()));
+    let vec_payload_size_matched: Arc<Mutex<Vec<i64>>> = Arc::new(Mutex::new(Vec::new()));
+    let vec_payload_size: Arc<Mutex<Vec<i64>>> = Arc::new(Mutex::new(Vec::new()));
     let vec_tlsh_disance: Arc<Mutex<Vec<i32>>> = Arc::new(Mutex::new(Vec::new()));
     
     // Create a list to store tlsh::Tlsh objects
@@ -139,11 +142,12 @@ fn main() {
 
     // Create map store to store tlsh_reports by tlsh
     let tlsh_reports: DashMap<String, Value> = DashMap::new();
+
     // Create a clap::ArgMatches object to store the CLI arguments
     let cmd = Command::new("precursor")
     .about("Precursor is a regex (PCRE2) and locality sensitive hasing (TLSH) tool for labeling and finding similairites between text, binary, or base64 encoded data.")
     .color(ColorChoice::Auto)
-    .after_help("Precursor currently supports the following TLSH algorithms:\n
+    .long_about("Precursor currently supports the following TLSH algorithms:\n
                   1. Tlsh48_1\n
                   2. Tlsh128_1\n
                   3. Tlsh128_3\n
@@ -178,6 +182,11 @@ fn main() {
         .long(TLSH_DIFF)
         .help("Perform TLSH distance calculations between every line of input provided. This is an expensive O(2^n) operation and can consume significant amounts of memory. You can optimize this by using appropriate PCRE2 pre-filters and chosing a smaller TLSH algorithm.")
         .action(ArgAction::SetTrue))
+    .arg(Arg::new(TLSH_SIM_ONLY)
+        .short('y')
+        .long(TLSH_SIM_ONLY)
+        .help("Only output JSON for the payloads containing TLSH similarities.")
+        .action(ArgAction::SetTrue))
     .arg(Arg::new(TLSH_DISTANCE)
         .short('x')
         .long(TLSH_DISTANCE)
@@ -201,8 +210,7 @@ fn main() {
         .short('j')
         .long(INPUT_JSON_KEY)
         .help("Specify the key for the JSON STDIN value that contains the payload.")
-        .action(ArgAction::Set)
-        .default_value(INPUT_JSON_KEY_BASE64))
+        .action(ArgAction::Set))
     .arg(Arg::new(STATS)
         .short('s')
         .long(STATS)
@@ -242,17 +250,17 @@ fn main() {
         .collect::<Vec<String>>()
         .par_iter()
         .for_each(|line| {
-            let line_json: Value = from_str(&line).unwrap();
             counter_inputs.inc();
+            vec_payload_size.lock().unwrap().push(line.len() as i64);
             handle_line(
-                &line_json,
+                &line,
                 &patterns,
                 &args,
                 &tlsh_list,
                 &payload_reports,
                 &counter_pcre_matches,
                 &counter_tlsh_hashes,
-                &vec_payload_size
+                &vec_payload_size_matched
             );
         });
 
@@ -269,14 +277,25 @@ fn main() {
         let duration_in_seconds = duration.as_secs_f32();
         let formated_duration: String = format!("{:.2}", duration_in_seconds);
 
-        // Payloads
+        // Payloads Matched
+        let payload_sizes_matched = vec_payload_size_matched.lock().unwrap();
+        let avg_payload_size_matched = payload_sizes_matched.iter().sum::<i64>() as f64 / payload_sizes_matched.len() as f64;
+        let min_payload_size_matched = payload_sizes_matched.iter().min().unwrap();
+        let max_payload_size_matched = payload_sizes_matched.iter().max().unwrap();
+        let mut sorted_payload_sizes_matched = payload_sizes_matched.clone();
+        sorted_payload_sizes_matched.sort();
+        let p95_payload_size_matched = sorted_payload_sizes_matched[(payload_sizes_matched.len() * 95 / 100) - 1];
+        let total_payload_size_matched = payload_sizes_matched.iter().sum::<i64>();
+        
+        // Raw Payloads
         let payload_sizes = vec_payload_size.lock().unwrap();
-        let avg_payload_size = payload_sizes.iter().sum::<i32>() as f32 / payload_sizes.len() as f32;
+        let avg_payload_size = payload_sizes.iter().sum::<i64>() as f64 / payload_sizes.len() as f64;
         let min_payload_size = payload_sizes.iter().min().unwrap();
         let max_payload_size = payload_sizes.iter().max().unwrap();
         let mut sorted_payload_sizes = payload_sizes.clone();
         sorted_payload_sizes.sort();
         let p95_payload_size = sorted_payload_sizes[(payload_sizes.len() * 95 / 100) - 1];
+        let total_payload_size = payload_sizes.iter().sum::<i64>();
 
         // TLSH Hashes
         let tlsh_distances: std::sync::MutexGuard<'_, Vec<i32>> = vec_tlsh_disance.lock().unwrap();
@@ -286,34 +305,37 @@ fn main() {
         let mut sorted_tlsh_distances = tlsh_distances.clone();
         sorted_tlsh_distances.sort();
         let p95_tlsh_distance = sorted_tlsh_distances[(tlsh_distances.len() * 95 / 100) - 1];
+
         
         // Create a JSON object for the stats
         let stats = json!({
-            "---PRECURSOR_STATISTICS---": "This JSON is output to STDERR",
-            "PCRE2": {
-                      "Patterns": counter_pcre_patterns.get(), 
-                      "Matches": counter_pcre_matches.get(), 
-                      "Unique": payload_reports.lock().unwrap().len(),
-                     },
+            "---PRECURSOR_STATISTICS---": "This JSON is output to STDERR so that you can parse stats seperate from the primary output.",
             "Inputs": {
-                        "Tot": counter_inputs.get(), 
+                        "Count": counter_inputs.get(), 
                         "AvgSize": avg_payload_size.round(),
                         "MinSize": *min_payload_size,
                         "MaxSize": *max_payload_size,
                         "P95Size": p95_payload_size,
-            }, 
-            "TLSH": {
-                    "HashesGenerated": counter_tlsh_hashes.get(), 
-                    "Similarities":
-                    {
-                        "Tot": counter_tlsh_similarites.get(), 
+                        "TotalSize": format_size(total_payload_size),},
+            "Match": {
+                        "Patterns": counter_pcre_patterns.get(), 
+                        "Matches": counter_pcre_matches.get(), 
+                        "Unique": payload_reports.lock().unwrap().len(),
+                        "HashesGenerated": counter_tlsh_hashes.get(),
+                        "AvgSize": avg_payload_size_matched.round(),
+                        "MinSize": *min_payload_size_matched,
+                        "MaxSize": *max_payload_size_matched,
+                        "P95Size": p95_payload_size_matched,
+                        "TotalSize": format_size(total_payload_size_matched),},
+            "Compare": {
+                        "Similarities": counter_tlsh_similarites.get(), 
                         "AvgDistance": avg_tlsh_distance.round(),
                         "MinDistance": *min_tlsh_distance,
                         "MaxDistance": *max_tlsh_distance,
-                        "P95Distance": p95_tlsh_distance,
-                    }
+                        "P95Distance": p95_tlsh_distance,},
+            "Performance": {
+                        "DurationSeconds": formated_duration,
             },
-            "RuntimeSeconds": formated_duration,
             }
         );
 
@@ -337,10 +359,15 @@ fn generate_reports(tlsh_reports: &DashMap<String, Value>, payload_reports: &Mut
             if let Some(tlsh_hash) = tlsh_hash {
                 if let Some(tlsh_similarities) = tlsh_reports.get(tlsh_hash) {
                     report_clone["tlsh_similarities"] = tlsh_similarities.value().clone();
+                    // Print reports with TLSH hash and TLSH similarities.
+                    println!("{}", to_string(&report_clone).unwrap());
+                } else if !args.get_flag(TLSH_SIM_ONLY) {
+                    // Print reports with TLSH hash but no TLSH similarities.
                     println!("{}", to_string(&report_clone).unwrap());
                 }
             }
-        } else {
+        } else if !args.get_flag(TLSH_SIM_ONLY) {
+            // Print reports empty TLSH hashes
             println!("{}", to_string(&report).unwrap());
         }
     }
@@ -359,7 +386,7 @@ fn run_hash_diffs(tlsh_list: &Mutex<Vec<TlshHashInstance>>,
         for (_j, tlsh_j) in tlsh_list_guard.iter().enumerate().skip(i + 1) {
             let include_file_length_in_calculation = args.get_flag(TLSH_LENGTH);
             let diff = tlsh_i.diff(tlsh_j, include_file_length_in_calculation);
-            if diff > *args.get_one(TLSH_DISTANCE).unwrap() {
+            if diff <= *args.get_one(TLSH_DISTANCE).unwrap() {
                 counter_tlsh_similarites.inc();
                 vec_tlsh_disance.lock().unwrap().push(diff);
                 let tlsh_hash_lowercase = tlsh_j.hash().to_ascii_lowercase();
@@ -414,84 +441,135 @@ fn calculate_tlsh_hash(payload: &[u8], args: &ArgMatches) -> Result<TlshHashInst
 }
 
 
-fn  handle_line(json_line: &Value, 
+fn sha256_hex(input: Vec<u8>) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(&input);
+    let result = hasher.finalize();
+    hex::encode(result)
+}
+
+fn format_size(size: i64) -> String {
+    const KILOBYTE: i64 = 1024;
+    const MEGABYTE: i64 = KILOBYTE * 1024;
+    const GIGABYTE: i64 = MEGABYTE * 1024;
+    const TERABYTE: i64 = GIGABYTE * 1024;
+
+    if size < KILOBYTE {
+        format!("{}B", size)
+    } else if size < MEGABYTE {
+        format!("{:.2}KB", size / KILOBYTE)
+    } else if size < GIGABYTE {
+        format!("{:.2}MB", size / MEGABYTE)
+    } else if size < TERABYTE {
+        format!("{:.2}GB", size / GIGABYTE)
+    } else {
+        format!("{:.2}TB", size / TERABYTE)
+    }
+}
+
+fn  handle_line(line: &String, 
                patterns: &[String], 
                args: &ArgMatches, 
                tlsh_list: &Mutex<Vec<TlshHashInstance>>,
                payload_reports: &Mutex<Map<String, Value>>,
                counter_pcre_matches: &Arc<ConsistentCounter>,
                counter_tlsh_hashes: &Arc<ConsistentCounter>,
-               vec_payload_size: &std::sync::Mutex<Vec<i32>>,
+               vec_payload_size_matched: &std::sync::Mutex<Vec<i64>>,
             ) {
+    #[allow(unused_assignments)]
+    let mut payload: Vec<u8> = Vec::new();
     if let Some(payload_key) = args.get_one::<String>(INPUT_JSON_KEY) {
         #[allow(unused_assignments)] // this is used below
-        let mut payload: Vec<u8> = Vec::new();
+        let line_json: Value = from_str(&line).unwrap();
         if args.contains_id(INPUT_MODE) {
             let input_mode = args.get_one::<String>(INPUT_MODE).unwrap();
             if input_mode == "base64" {
-                let payloadb64: &str = json_line[payload_key].as_str().unwrap();
+                let payloadb64: &str = line_json[payload_key].as_str().unwrap();
                 payload = STANDARD.decode(payloadb64).unwrap();
             } else if input_mode == "string" {
-                payload = json_line[payload_key].as_str().unwrap().as_bytes().to_vec();
+                payload = line_json[payload_key].as_str().unwrap().as_bytes().to_vec();
             } else {
                 panic!("{} not supported with -j / --input-json-key", input_mode);
             } 
         } else {
-            let payloadb64: &str = json_line[payload_key].as_str().unwrap();
+            let payloadb64: &str = line_json[payload_key].as_str().unwrap();
             payload = STANDARD.decode(payloadb64).unwrap();
         }
+    } else {
+        #[allow(unused_assignments)] // this is used below
+        if args.contains_id(INPUT_MODE) {
+            let input_mode = args.get_one::<String>(INPUT_MODE).unwrap();
+            if input_mode == "base64" {
+                let payloadb64: &str = line;
+                payload = STANDARD.decode(payloadb64).unwrap();
+            } else if input_mode == "string" {
+                payload = line.as_bytes().to_vec();
+            } else {
+                panic!("{} not supported with -j / --input-json-key", input_mode);
+            } 
+        } else {
+            let payloadb64: &str = line;
+            payload = STANDARD.decode(payloadb64).unwrap();
+        }
+    }  
 
-        let matched_capture_groups = Mutex::new(Value::Array(Vec::new()));
+    let sha256_sum = sha256_hex(payload.clone());
 
-        let match_exists = patterns
-            .par_iter()
-            .map(|pattern| {
-                let re = Regex::new(&pattern).unwrap();
-                re.captures_iter(payload.as_slice())
-                    .filter_map(|res| res.ok())
-                    .any(|caps| {
-                        vec_payload_size.lock().unwrap().push(payload.len() as i32);
-                        for name in re.capture_names() {
-                            counter_pcre_matches.inc();
-                            if let Some(name) = name {
-                                 if caps.name(name).is_some() {
-                                    let mut matched_capture_groups = matched_capture_groups.lock().unwrap();
-                                    matched_capture_groups.as_array_mut().unwrap().push(Value::String(name.to_string()));
-                                    return true;
-                                }
+    let matched_capture_groups = Mutex::new(Value::Array(Vec::new()));
+
+    let match_exists = patterns
+        .par_iter()
+        .map(|pattern| {
+            let re = Regex::new(&pattern).unwrap();
+            re.captures_iter(payload.as_slice())
+                .filter_map(|res| res.ok())
+                .any(|caps| {
+                    vec_payload_size_matched.lock().unwrap().push(payload.len() as i64);
+                    for name in re.capture_names() {
+                        counter_pcre_matches.inc();
+                        if let Some(name) = name {
+                                if caps.name(name).is_some() {
+                                let mut matched_capture_groups = matched_capture_groups.lock().unwrap();
+                                matched_capture_groups.as_array_mut().unwrap().push(Value::String(name.to_string()));
+                                return true;
                             }
                         }
-                        false
-                    })
-            })
-            .any(|result| result);
+                    }
+                    false
+                })
+        })
+        .any(|result| result);
 
-        let mut json_tlsh_hash: Value = Value::String(String::new());
-        if match_exists {
-            // We only calculate TLSH hashes and push to the global TLSH list 
-            // If the payload passes the pattern_match gate
-            // This helps us acchieve a massive reduction in work for TLSH computation
-            if args.get_flag(TLSH) || args.get_flag(TLSH_DIFF) || args.get_flag(TLSH_LENGTH) {
-                match calculate_tlsh_hash(payload.as_slice(), &args) {
-                    Ok(hash) => {
-                        counter_tlsh_hashes.inc();
-                        let cloned_hash = hash.hash().clone();
-                        tlsh_list.lock().unwrap().push(hash);
-                        let tlsh_hash_lowercase = cloned_hash.to_ascii_lowercase();
-                        let tlsh_hash_string = String::from_utf8(tlsh_hash_lowercase);
-                        json_tlsh_hash = Value::String(tlsh_hash_string.unwrap());
-                    },
-                    Err(_err) => {
-                        // Handle the error by printing an error message
-                        //println!("Error calculating TLSH hash: {}", err);
-                    },
-                };
-            }
+    let mut json_tlsh_hash: Value = Value::String(String::new());
+    if match_exists {
+        // We only calculate TLSH hashes and push to the global TLSH list 
+        // If the payload passes the pattern_match gate
+        // This helps us acchieve a massive reduction in work for TLSH computation
+        if args.get_flag(TLSH) || args.get_flag(TLSH_DIFF) || args.get_flag(TLSH_LENGTH) {
+            match calculate_tlsh_hash(payload.as_slice(), &args) {
+                Ok(hash) => {
+                    counter_tlsh_hashes.inc();
+                    let cloned_hash = hash.hash().clone();
+                    tlsh_list.lock().unwrap().push(hash);
+                    let tlsh_hash_lowercase = cloned_hash.to_ascii_lowercase();
+                    let tlsh_hash_string = String::from_utf8(tlsh_hash_lowercase);
+                    json_tlsh_hash = Value::String(tlsh_hash_string.unwrap());
+                },
+                Err(_err) => {
+                    // Handle the error by printing an error message
+                    //println!("Error calculating TLSH hash: {}", err);
+                },
+            };
+        }
 
-            /*
-            Create JSON output for payload only when match exists
-            */
-            let mut json_clone = json_line.clone();
+        /*
+        Create JSON output for payload only when match exists
+        */
+        if args.contains_id(INPUT_JSON_KEY){
+            // WARNING: This logic should probably move up so we don't have to parse the input
+            // JSON twice from the line. 
+            let line_json: Value = from_str(&line).unwrap();
+            let mut json_clone = line_json.clone();
             let json_tlsh_hash_clone  = json_tlsh_hash.clone();
             if json_tlsh_hash_clone.as_str() == None {
                 json_clone["tlsh"] = Value::String(String::new());
@@ -499,11 +577,11 @@ fn  handle_line(json_line: &Value,
                 json_clone["tlsh"] = json_tlsh_hash.clone();
             }
             json_clone["tags"] = matched_capture_groups.lock().unwrap().clone();
-            let sha256_sum: &str = json_line["sha256_sum"].as_str().unwrap();
-            payload_reports.lock().unwrap().insert(sha256_sum.to_string(), json_clone);
+            
+            // This is where we insert the finished per-payload report
+            payload_reports.lock().unwrap().insert(sha256_sum, json_clone);
+        } else {
+            //let json_tlsh_hash_clone  = json_tlsh_hash.clone();
         }
-        
-    } else {
-        println!("No payload key specified");
-    }  
+    }
 }

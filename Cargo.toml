@@ -7,7 +7,7 @@ edition = "2018"
 [dependencies]
 clap = "4.4.6"
 pcre2 = "0.2.5"
-serde_json = "1.0.107"
+serde_json = { version = "1.0.107", features = ["preserve_order"] }
 tlsh2 = { version = "0.3.0", features = ["diff"] }
 hex = "0.4.3"
 lazy_static = "1.4.0"
@@ -15,7 +15,7 @@ base64 = "0.21.4"
 rayon = "1.8.0"
 dashmap = "5.5.3"
 atomic-counter = "1.0.1"
-prettytable-rs = "0.10.0"
+sha2 = "0.10.8"
 
 [[bin]]
 name = "precursor"
