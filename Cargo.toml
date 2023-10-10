@@ -5,6 +5,7 @@ authors = ["Your Name <you@example.com>"]
 edition = "2018"
 
 [dependencies]
+xxhash-rust = { version = "0.8.0", features = ["xxh3", "const_xxh3"] }
 clap = "4.4.6"
 pcre2 = "0.2.5"
 serde_json = { version = "1.0.107", features = ["preserve_order"] }
@@ -16,7 +17,7 @@ rayon = "1.8.0"
 dashmap = "5.5.3"
 atomic-counter = "1.0.1"
 sha2 = "0.10.8"
-
+jaq-core = "0.10.0"
 [[bin]]
 name = "precursor"
 path = "src/main.rs"

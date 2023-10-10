@@ -1,0 +1,46 @@
+@startuml
+skinparam arrowThickness 4
+skinparam nodesep 10
+skinparam ranksep 20
+
+rectangle "Input (STDIN or File)" as input {
+    rectangle "Base64" as rawBase64
+    rectangle "Hex" as rawHex
+    rectangle "String" as rawString
+    rectangle "Binary" as binary 
+}
+
+rectangle "Patterns (PCRE2)" as patterns {
+    rectangle "File/s" as patternfile
+    rectangle "Argument" as patternargument
+}
+
+rectangle "Filter" as filter {
+  rectangle "Remove" as remove
+  rectangle "Label" as label
+}
+
+rectangle "Compare (TLSH)" as compare {
+  rectangle "Algorithms" as tlshAlgorithms
+  rectangle "Threshold" as distanceThreshold
+}
+
+rectangle "Output (STDOUT)" as stdout {
+  rectangle "Merged JSON" as jsonOutput
+  rectangle "JSON" as nonJsonOutput
+}
+
+rectangle "Statistics (STDERR)" as stderr {
+  rectangle "Input" as inputStats
+  rectangle "Pattern" as inputStats
+  rectangle "Filter" as filterStats
+  rectangle "Compare" as compareStats
+  rectangle "Environment" as runStats
+}
+
+input -down[thickness=10]-> filter
+patterns -down-> filter
+filter -down[thickness=5]-> compare
+compare -down-> stdout
+compare -down-> stderr
+@enduml
