@@ -1,0 +1,22 @@
+# /usr/bin/python3
+
+import sys
+import binascii
+from struct import *
+
+
+def main():
+    if len(sys.argv) != 4:
+        print("Usage: my_cli <format> <data> <name>")
+        return
+
+    format = sys.argv[1]
+    data = sys.argv[2]
+    name = sys.argv[3]
+
+
+    packed = ''.join(['%02x' % b for b in pack(format, *data.split(','))])
+    print(f"(?s)(?<{name}>.*\\x{[packed]}.*)")
+
+if __name__ == "__main__":
+    main()

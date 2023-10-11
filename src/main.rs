@@ -13,7 +13,7 @@ use clap::{Arg, ArgAction, Command, ColorChoice, ArgMatches, builder::PathBufVal
 use dashmap::DashMap;
 use hex;
 use jaq_core::{parse, Ctx, Definitions, RcIter, Val};
-use pcre2::bytes::Regex;
+use pcre2::bytes::{RegexBuilder, Regex};
 use rayon::prelude::*;
 use serde_json::{from_str, to_string, Value, Map, Number, json};
 use tlsh2;
@@ -229,10 +229,10 @@ fn main() {
     #[allow(unused_assignments)] // This is valid because of the rayon usesage via the par_iter() method
     let mut patterns: Vec<String> = Vec::new();
     if args.contains_id(PATTERN_FILE) {
-        let pattern_file = args.get_one::<std::path::PathBuf>(PATTERN_FILE).unwrap();
+        let pattern_file = args.get_one::<std::path::PathBuf>(PATTERN_FILE).expect("Unable to read pattern file");
         patterns = read_patterns(Some(pattern_file));
     } else {
-        let pattern = args.get_one::<String>(PATTERN).unwrap();
+        let pattern = args.get_one::<String>(PATTERN).expect("Unable to read pattern");
         patterns = vec![pattern.to_string()];
     }
 
@@ -398,7 +398,7 @@ fn main() {
 // Unpacks the reports from the shared mutex 
 // and performs TLSH hash lookups for the matches from the tlsh in the payload report./
 fn generate_reports(tlsh_reports: &DashMap<String, Value>, payload_reports: &Mutex<Map<String, Value>>, args: &ArgMatches) {
-    for (xxh3_64_sum, report) in payload_reports.lock().unwrap().iter() {
+    for (xxh3_64_sum, report) in payload_reports.lock().expect("unable to get payload_reports").iter() {
         if report["tlsh"] != "" && args.get_flag(TLSH_DIFF) {
             let mut report_clone = report.clone();
             let tlsh_hash: Option<&str> = report["tlsh"].as_str();
@@ -407,11 +407,11 @@ fn generate_reports(tlsh_reports: &DashMap<String, Value>, payload_reports: &Mut
                 if let Some(tlsh_similarities) = tlsh_reports.get(tlsh_hash) {
                     report_clone["tlsh_similarities"] = tlsh_similarities.value().clone();
                     // Print reports with TLSH hash and TLSH similarities.
-                    println!("{}", to_string(&report_clone).unwrap());
+                    println!("{}", to_string(&report_clone).expect("unable to print report to string"));
                     io::stdout().flush().expect("Error flushing STDOUT buffer");
                 } else if !args.get_flag(TLSH_SIM_ONLY) {
                     // Print reports with TLSH hash but no TLSH similarities.
-                    println!("{}", to_string(&report_clone).unwrap());
+                    println!("{}", to_string(&report_clone).expect("unable to print report to string"));
                     io::stdout().flush().expect("Error flushing STDOUT buffer");
                 }
             }
@@ -419,7 +419,7 @@ fn generate_reports(tlsh_reports: &DashMap<String, Value>, payload_reports: &Mut
             // Print reports empty TLSH hashes
             let mut report_clone = report.clone();
             report_clone["xxh3_64_sum"] = json!(xxh3_64_sum.as_str());
-            println!("{}", to_string(&report_clone).unwrap());
+            println!("{}", to_string(&report_clone).expect("unable to print report to string"));
         }
     }
 }
@@ -438,13 +438,13 @@ fn run_hash_diffs(tlsh_list: &Mutex<Vec<TlshHashInstance>>,
             let include_file_length_in_calculation = args.get_flag(TLSH_LENGTH);
             let diff = tlsh_i.diff(tlsh_j, include_file_length_in_calculation);
             vec_tlsh_disance.lock().unwrap().push(diff);
-            if diff <= *args.get_one(TLSH_DISTANCE).unwrap() {
+            if diff <= *args.get_one(TLSH_DISTANCE).expect("unable to get TLSH distance argument") {
                 counter_tlsh_similarites.inc();
                 let tlsh_hash_lowercase = tlsh_j.hash().to_ascii_lowercase();
                 let tlsh_hash_string = String::from_utf8(tlsh_hash_lowercase);
                 let diff_number: Number = diff.into();
 
-                local_tlsh_map.insert(tlsh_hash_string.unwrap(), Value::Number(diff_number));
+                local_tlsh_map.insert(tlsh_hash_string.expect("unable to convert TLSH hash to string from UTF8"), Value::Number(diff_number));
             }
         }
         let tlsh_hash_lowercase = tlsh_i.hash().to_ascii_lowercase();
@@ -530,6 +530,17 @@ fn format_size(size: i64) -> String {
     }
 }
 
+
+fn build_regex(pattern: &String) ->Result<Regex, Box<dyn std::error::Error>> {
+    let re = RegexBuilder::new()
+        // NOTE: We should only enable JIT if we're going to compile all patterns into one large PCRE2 statement
+        // TODO: Pass CLI flags for certain REGEX settings down to the builder.
+        .jit_if_available(false)
+        .multi_line(true)
+        .build(pattern)?;
+    Ok(re)
+}
+
 fn  handle_line(line: &String, 
                patterns: &[String], 
                args: &ArgMatches, 
@@ -604,7 +615,7 @@ fn  handle_line(line: &String,
     patterns
     .par_iter()
     .for_each(|pattern: &String| {
-        let re = Regex::new(&pattern).unwrap();
+        let re = build_regex(pattern).expect(&format!("invalid PCRE2 found: {}", pattern));
         let result = re.captures_iter(payload.as_slice())
             .filter_map(|res| res.ok())
             .any(|caps| {
