@@ -13,6 +13,8 @@
  4. Add a training mode that uses a sample to find the optimal TLSH algorithm and distance for finding similairites within the supplied input.
  5. Add support for binary inputs
  6. Add support for processing entire input vs newline split (requirement for binary input)
+ 7. Use roaring bitmap for persistance
+ 8. Add ability to mask chunks based on a pattern for TLSH/FBHash
 
 ## Installation
 
