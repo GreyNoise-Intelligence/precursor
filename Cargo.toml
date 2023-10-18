@@ -1,8 +1,14 @@
 [package]
 name = "precursor"
 version = "0.1.0"
-authors = ["Your Name <you@example.com>"]
-edition = "2018"
+authors = ["Matt Lehman <obsecurus@users.noreply.github.com>"]
+homepage = "https://github.com/GreyNoise-Intelligence/precursor"
+repository = "https://github.com/GreyNoise-Intelligence/precursor"
+description = "A data analysis tool for text and binary tagging and filtering with similarity comparisons."
+readme = "README.md"
+keywords = ["binary", "tool", "analysis", "similarity", "hashing", "forensics"]
+license = "MIT"
+categories = ["command-line-utilities", "filesystem", "datascience"]
 
 [dependencies]
 xxhash-rust = { version = "0.8.0", features = ["xxh3", "const_xxh3"] }
@@ -18,6 +24,7 @@ dashmap = "5.5.3"
 atomic-counter = "1.0.1"
 sha2 = "0.10.8"
 jaq-core = "0.10.0"
+indicatif = "0.17.7"
 
 [[bin]]
 name = "precursor"

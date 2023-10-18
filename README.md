@@ -8,10 +8,11 @@
 
 ## TODO
  1. Add docstrings with GPT
- 2. Add the ability support a folder of PATTERN_FILES
- 3. Maybe support PCAP with some mechanism that parses the PCAP into some consistent newline structure for specific protocols?
- 4. Add a mode to disable pattern matching, which could just essentially inject a `(?<all>.*)` pattern but that may be much slower.
- 5. Add a training mode that uses a sample to find the optimal TLSH algorithm and distance for finding similairites within the supplied input.
+ 2. Maybe support PCAP with some mechanism that parses the PCAP into some consistent newline structure for specific protocols?
+ 3. Add a mode to disable pattern matching, which could just essentially inject a `(?<all>.*)` pattern but that may be much slower.
+ 4. Add a training mode that uses a sample to find the optimal TLSH algorithm and distance for finding similairites within the supplied input.
+ 5. Add support for binary inputs
+ 6. Add support for processing entire input vs newline split (requirement for binary input)
 
 ## Installation
 

@@ -1,3 +1,5 @@
+mod precursor;
+
 use std::collections::HashSet;
 use std::error::Error;
 use std::fmt;
@@ -5,6 +7,19 @@ use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
+
+extern crate atomic_counter;
+extern crate base64;
+extern crate clap;
+extern crate dashmap;
+extern crate indicatif;
+extern crate jaq_core;
+extern crate pcre2;
+extern crate rayon;
+extern crate serde_json;
+extern crate xxhash_rust;
+
+use crate::precursor::tlsh::*;
 
 use atomic_counter::{AtomicCounter, ConsistentCounter};
 use base64::engine::{general_purpose::STANDARD, Engine};
@@ -37,100 +52,6 @@ const INPUT_MODE_HEX: &str = "hex";
 const INPUT_JSON_KEY: &str = "input-json-key";
 const PATTERN_FILE: &str = "pattern-file";
 const PATTERN: &str = "pattern";
-
-enum TlshHashInstance {
-    Tlsh48_1(tlsh2::Tlsh48_1),
-    Tlsh128_1(tlsh2::Tlsh128_1),
-    Tlsh128_3(tlsh2::Tlsh128_3),
-    Tlsh256_1(tlsh2::Tlsh256_1),
-    Tlsh256_3(tlsh2::Tlsh256_3),
-}
-
-enum TlshBuilderInstance {
-    Tlsh48_1(tlsh2::TlshBuilder48_1),
-    Tlsh128_1(tlsh2::TlshBuilder128_1),
-    Tlsh128_3(tlsh2::TlshBuilder128_3),
-    Tlsh256_1(tlsh2::TlshBuilder256_1),
-    Tlsh256_3(tlsh2::TlshBuilder256_3),
-}
-
-impl TlshHashInstance {
-    fn diff(&self, other: &Self, include_file_length: bool) -> i32 {
-        match (self, other) {
-            (TlshHashInstance::Tlsh48_1(hash1), TlshHashInstance::Tlsh48_1(hash2)) => {
-                hash1.diff(hash2, include_file_length)
-            }
-            (TlshHashInstance::Tlsh128_1(hash1), TlshHashInstance::Tlsh128_1(hash2)) => {
-                hash1.diff(hash2, include_file_length)
-            }
-            (TlshHashInstance::Tlsh128_3(hash1), TlshHashInstance::Tlsh128_3(hash2)) => {
-                hash1.diff(hash2, include_file_length)
-            }
-            (TlshHashInstance::Tlsh256_1(hash1), TlshHashInstance::Tlsh256_1(hash2)) => {
-                hash1.diff(hash2, include_file_length)
-            }
-            (TlshHashInstance::Tlsh256_3(hash1), TlshHashInstance::Tlsh256_3(hash2)) => {
-                hash1.diff(hash2, include_file_length)
-            }
-            _ => panic!("Incompatible hash types"),
-        }
-    }
-
-    fn hash(&self) -> Vec<u8> {
-        match self {
-            TlshHashInstance::Tlsh48_1(hash) => hash.hash().to_vec(),
-            TlshHashInstance::Tlsh128_1(hash) => hash.hash().to_vec(),
-            TlshHashInstance::Tlsh128_3(hash) => hash.hash().to_vec(),
-            TlshHashInstance::Tlsh256_1(hash) => hash.hash().to_vec(),
-            TlshHashInstance::Tlsh256_3(hash) => hash.hash().to_vec(),
-        }
-    }
-}
-
-impl TlshBuilderInstance {
-    fn update(&mut self, data: &[u8]) {
-        match self {
-            TlshBuilderInstance::Tlsh48_1(builder) => builder.update(data),
-            TlshBuilderInstance::Tlsh128_1(builder) => builder.update(data),
-            TlshBuilderInstance::Tlsh128_3(builder) => builder.update(data),
-            TlshBuilderInstance::Tlsh256_1(builder) => builder.update(data),
-            TlshBuilderInstance::Tlsh256_3(builder) => builder.update(data),
-        }
-    }
-
-    fn build(self) -> Option<TlshHashInstance> {
-        match self {
-            TlshBuilderInstance::Tlsh48_1(builder) => {
-                builder.build().map(TlshHashInstance::Tlsh48_1)
-            }
-            TlshBuilderInstance::Tlsh128_1(builder) => {
-                builder.build().map(TlshHashInstance::Tlsh128_1)
-            }
-            TlshBuilderInstance::Tlsh128_3(builder) => {
-                builder.build().map(TlshHashInstance::Tlsh128_3)
-            }
-            TlshBuilderInstance::Tlsh256_1(builder) => {
-                builder.build().map(TlshHashInstance::Tlsh256_1)
-            }
-            TlshBuilderInstance::Tlsh256_3(builder) => {
-                builder.build().map(TlshHashInstance::Tlsh256_3)
-            }
-        }
-    }
-}
-
-#[derive(Debug)]
-struct TlshCalculationError {
-    message: String,
-}
-
-impl fmt::Display for TlshCalculationError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.message)
-    }
-}
-
-impl Error for TlshCalculationError {}
 
 fn main() {
     // Start execution timer
@@ -572,35 +493,6 @@ fn read_patterns(pattern_file: Option<&PathBuf>) -> Vec<String> {
     patterns
 }
 
-fn calculate_tlsh_hash(
-    payload: &[u8],
-    args: &ArgMatches,
-) -> Result<TlshHashInstance, TlshCalculationError> {
-    if payload.len() < 49 {
-        return Err(TlshCalculationError {
-            message: "Payload must be at least 48 bytes".to_owned(),
-        });
-    }
-    let tlsh_algorithm = args.get_one::<String>(TLSH_ALGORITHM).unwrap();
-    let mut builder: TlshBuilderInstance = match tlsh_algorithm.as_str() {
-        "48_1" => TlshBuilderInstance::Tlsh48_1(tlsh2::TlshBuilder48_1::new()),
-        "128_1" => TlshBuilderInstance::Tlsh128_1(tlsh2::TlshBuilder128_1::new()),
-        "128_3" => TlshBuilderInstance::Tlsh128_3(tlsh2::TlshBuilder128_3::new()),
-        "256_1" => TlshBuilderInstance::Tlsh256_1(tlsh2::TlshBuilder256_1::new()),
-        "256_3" => TlshBuilderInstance::Tlsh256_3(tlsh2::TlshBuilder256_3::new()),
-        _ => TlshBuilderInstance::Tlsh48_1(tlsh2::TlshBuilder48_1::new()),
-    };
-    builder.update(payload);
-    if let Some(tlsh_hash) = builder.build() {
-        Ok(tlsh_hash)
-    } else {
-        let error_message: String = format!("Failed to calculate TLSH hash for  {:?}", payload);
-        Err(TlshCalculationError {
-            message: error_message,
-        })
-    }
-}
-
 fn xxh3_64_hex(input: Vec<u8>) -> (u64, String) {
     let hash = xxh3_64(&input);
     (hash, format!("{:x}", hash))
@@ -762,12 +654,13 @@ fn handle_line(
     });
 
     let mut json_tlsh_hash: Value = Value::String(String::new());
+    let tlsh_algorithm = args.get_one::<String>(TLSH_ALGORITHM).unwrap();
     if *match_exists.lock().unwrap() {
         // We only calculate TLSH hashes and push to the global TLSH list
         // If the payload passes the pattern_match gate
         // This helps us acchieve a massive reduction in work for TLSH computation
         if args.get_flag(TLSH) || args.get_flag(TLSH_DIFF) || args.get_flag(TLSH_LENGTH) {
-            match calculate_tlsh_hash(payload.as_slice(), args) {
+            match calculate_tlsh_hash(payload.as_slice(), tlsh_algorithm) {
                 Ok(hash) => {
                     counter_tlsh_hashes.inc();
                     let cloned_hash = hash.hash().clone();
