@@ -7,7 +7,7 @@
 `precursor` is a command-line tool for searching files and directories using regular expressions. It supports searching against a rules file with named rules/patterns and outputting each match with both the name of the rule and the matched bytes. It also supports searching against a single pattern in the named format and optionally reading from STDIN for the input to search against. Additionally, it can output matches in JSON format and optionally summarize the matches by rule name and count.
 
 ## TODO
- 1. Add docstrings with GPT
+ 1. Better comments and documentation
  2. Maybe support PCAP with some mechanism that parses the PCAP into some consistent newline structure for specific protocols?
  3. Add a mode to disable pattern matching, which could just essentially inject a `(?<all>.*)` pattern but that may be much slower.
  4. Add a training mode that uses a sample to find the optimal TLSH algorithm and distance for finding similairites within the supplied input.
@@ -15,6 +15,8 @@
  6. Add support for processing entire input vs newline split (requirement for binary input)
  7. Use roaring bitmap for persistance
  8. Add ability to mask chunks based on a pattern for TLSH/FBHash
+ 9. Some very basic tests
+ 10. Refactor things so that CLI is isolated from using `precursor` as a library
 
 ## Installation
 
