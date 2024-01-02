@@ -1,4 +1,6 @@
-# THIS IS UNDER CONSTRUCTION IGNORE ALL GROSS STUFFS
+# UNDER CONSTRUCTION 
+
+## SEVERLY LACKING DOCUMENTATION AND WILL LIKELY BREAK!
 
 ![precursor](./architecture.png)
 
@@ -57,11 +59,15 @@ This will search for the specified pattern in the input file with the specified 
 
 ## License
 
-`precursor` is licensed under the MIT license. See the LICENSE file for more information.
+`precursor` is is dual-licensed under the Unlicense and MIT licenses.
+
+You may use this code under the terms of either license.
 
 ## Acknowledgements
 
 `precursor` is inspired by various Rust command-line tools and libraries, including `ripgrep`, `grep`, and `pcre2`. Special thanks to the Rust community for creating and maintaining these amazing tools and libraries.
+
+In fact much of the build system is verbatim from `ripgrep` as I thought there may be a future where this gets folded in as a module some how. Thank you [BurntSushi](https://github.com/BurntSushi)!
 
 ## Contributing
 

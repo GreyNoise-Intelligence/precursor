@@ -4,5 +4,6 @@
         "./Cargo.toml",
         "./Cargo.toml",
         "./Cargo.toml"
-    ]
+    ],
+    "cmake.configureOnOpen": false
 }
