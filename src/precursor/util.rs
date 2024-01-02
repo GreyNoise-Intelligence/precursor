@@ -4,17 +4,6 @@ use pcre2::bytes::{Regex, RegexBuilder};
 use std::path::PathBuf;
 use xxhash_rust::xxh3::xxh3_64;
 
-pub fn create_progress_bar(size: u64, quiet: bool) -> ProgressBar {
-    if !quiet {
-        let style = ProgressStyle::default_bar()
-            .template("[{elapsed_precise} {eta}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}")
-            .unwrap();
-        ProgressBar::new(size).with_style(style)
-    } else {
-        ProgressBar::hidden()
-    }
-}
-
 pub fn xxh3_64_hex(input: Vec<u8>) -> (u64, String) {
     let hash = xxh3_64(&input);
     (hash, format!("{:x}", hash))
