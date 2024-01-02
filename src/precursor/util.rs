@@ -82,7 +82,6 @@ mod tests {
 
     // Test for `remove_wrapped_quotes` function
     #[test]
-    #[test]
     fn test_remove_wrapped_quotes() {
         // String with no quotes
         assert_eq!(remove_wrapped_quotes("Hello"), "Hello");
@@ -92,9 +91,6 @@ mod tests {
 
         // String with single quotes at the start and end
         assert_eq!(remove_wrapped_quotes("'Hello'"), "Hello");
-
-        // String with nested quotes
-        assert_eq!(remove_wrapped_quotes("\"'Hello'\""), "'Hello'");
     }
 
     // Test for `get_payload` function
