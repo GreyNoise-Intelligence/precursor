@@ -1,5 +1,4 @@
 use base64::engine::{general_purpose::STANDARD, Engine};
-use indicatif::{ProgressBar, ProgressStyle};
 use pcre2::bytes::{Regex, RegexBuilder};
 use std::path::PathBuf;
 use xxhash_rust::xxh3::xxh3_64;
@@ -63,4 +62,75 @@ pub fn build_regex(pattern: &String) -> Result<Regex, Box<dyn std::error::Error>
         .multi_line(true)
         .build(pattern)?;
     Ok(re)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs::File;
+    use std::io::Write;
+    use std::path::Path;
+
+    // Test for `xxh3_64_hex` function
+    #[test]
+    fn test_xxh3_64_hex() {
+        let input = b"Hello, world!";
+        let (hash, hex) = xxh3_64_hex(input.to_vec());
+        assert_ne!(hash, 0);
+        assert_eq!(hex, format!("{:x}", hash));
+    }
+
+    // Test for `remove_wrapped_quotes` function
+    #[test]
+    fn test_remove_wrapped_quotes() {
+        assert_eq!(remove_wrapped_quotes("'Hello'"), "Hello");
+        assert_eq!(remove_wrapped_quotes("\"Hello\""), "Hello");
+        assert_eq!(remove_wrapped_quotes("Hello"), "Hello");
+        assert_eq!(remove_wrapped_quotes("'\"Hello\"'"), "\"Hello\"");
+    }
+
+    // Test for `get_payload` function
+    #[test]
+    fn test_get_payload() {
+        assert_eq!(get_payload("aGVsbG8=", "base64"), b"hello".to_vec());
+        assert_eq!(get_payload("hello", "string"), b"hello".to_vec());
+        assert_eq!(get_payload("68656c6c6f", "hex"), b"hello".to_vec());
+
+        let result = std::panic::catch_unwind(|| get_payload("hello", "invalid_mode"));
+        assert!(result.is_err());
+    }
+
+    // Test for `format_size` function
+    #[test]
+    fn test_format_size() {
+        assert_eq!(format_size(500), "500B");
+        assert_eq!(format_size(1500), "1.46KB");
+        assert_eq!(format_size(1500000), "1.43MB");
+        assert_eq!(format_size(1500000000), "1.40GB");
+        assert_eq!(format_size(1500000000000), "1.36TB");
+    }
+
+    // Test for `read_patterns` function
+    // Note: This requires a real or mocked file system
+    #[test]
+    fn test_read_patterns() {
+        // Setup: Create a temporary file with some patterns
+        let temp_file_path = Path::new("temp_patterns.txt");
+        let mut temp_file = File::create(&temp_file_path).expect("Failed to create temp file");
+        writeln!(temp_file, "pattern1\npattern2").expect("Failed to write to temp file");
+
+        // Test: Read patterns from the file
+        let patterns = read_patterns(Some(&temp_file_path.to_path_buf()));
+        assert_eq!(patterns, vec!["pattern1", "pattern2"]);
+
+        // Clean up: Remove the temporary file
+        std::fs::remove_file(temp_file_path).expect("Failed to delete temp file");
+    }
+
+    // Test for `build_regex` function
+    #[test]
+    fn test_build_regex() {
+        assert!(build_regex(&"\\d+".to_string()).is_ok());
+        assert!(build_regex(&"[InvalidRegex".to_string()).is_err());
+    }
 }
