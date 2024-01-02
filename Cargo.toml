@@ -26,7 +26,6 @@ atomic-counter = "1.0.1"
 sha2 = "0.10.8"
 jaq-core = "0.10.0"
 indicatif = "0.17.7"
-fbhash = { git = "https://github.com/Obsecurus/fbhash.git", branch = "main" }
 
 [[bin]]
 name = "precursor"
