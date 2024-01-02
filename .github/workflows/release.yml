@@ -160,7 +160,7 @@ jobs:
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
             bin="target/${{ matrix.target }}/release/precursor.exe"
           else
-            bin="target/${{ matrix.target }}/release/rg"
+            bin="target/${{ matrix.target }}/release/precursor"
           fi
           echo "BIN=$bin" >> $GITHUB_ENV
 
@@ -177,7 +177,7 @@ jobs:
             "$PWD/target:/target:Z" \
             "rustembedded/cross:${{ matrix.target }}" \
             "${{ matrix.strip }}" \
-            "/target/${{ matrix.target }}/release/rg"
+            "/target/${{ matrix.target }}/release/precursor"
 
       - name: Determine archive name
         shell: bash
@@ -305,7 +305,7 @@ jobs:
         shell: bash
         run: |
           cargo build --target ${{ env.TARGET }}
-          bin="target/${{ env.TARGET }}/debug/rg"
+          bin="target/${{ env.TARGET }}/debug/precursor"
           echo "BIN=$bin" >> $GITHUB_ENV
 
       - name: Create deployment directory
