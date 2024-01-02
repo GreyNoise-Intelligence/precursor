@@ -33,13 +33,13 @@ pub fn format_size(size: i64) -> String {
     if size < KILOBYTE {
         format!("{}B", size)
     } else if size < MEGABYTE {
-        format!("{:.2}KB", size / KILOBYTE)
+        format!("{:.2}KB", (size as f64) / (KILOBYTE as f64))
     } else if size < GIGABYTE {
-        format!("{:.2}MB", size / MEGABYTE)
+        format!("{:.2}MB", (size as f64) / (MEGABYTE as f64))
     } else if size < TERABYTE {
-        format!("{:.2}GB", size / GIGABYTE)
+        format!("{:.2}GB", (size as f64) / (GIGABYTE as f64))
     } else {
-        format!("{:.2}TB", size / TERABYTE)
+        format!("{:.2}TB", (size as f64) / (TERABYTE as f64))
     }
 }
 
@@ -82,11 +82,19 @@ mod tests {
 
     // Test for `remove_wrapped_quotes` function
     #[test]
+    #[test]
     fn test_remove_wrapped_quotes() {
-        assert_eq!(remove_wrapped_quotes("'Hello'"), "Hello");
-        assert_eq!(remove_wrapped_quotes("\"Hello\""), "Hello");
+        // String with no quotes
         assert_eq!(remove_wrapped_quotes("Hello"), "Hello");
-        assert_eq!(remove_wrapped_quotes("'\"Hello\"'"), "\"Hello\"");
+
+        // String with double quotes at the start and end
+        assert_eq!(remove_wrapped_quotes("\"Hello\""), "Hello");
+
+        // String with single quotes at the start and end
+        assert_eq!(remove_wrapped_quotes("'Hello'"), "Hello");
+
+        // String with nested quotes
+        assert_eq!(remove_wrapped_quotes("\"'Hello'\""), "'Hello'");
     }
 
     // Test for `get_payload` function
@@ -103,11 +111,16 @@ mod tests {
     // Test for `format_size` function
     #[test]
     fn test_format_size() {
-        assert_eq!(format_size(500), "500B");
-        assert_eq!(format_size(1500), "1.46KB");
-        assert_eq!(format_size(1500000), "1.43MB");
-        assert_eq!(format_size(1500000000), "1.40GB");
-        assert_eq!(format_size(1500000000000), "1.36TB");
+        assert_eq!(format_size(500), "500B"); // Exact bytes
+        assert_eq!(format_size(1023), "1023B"); // Edge case for bytes to KB
+        assert_eq!(format_size(1024), "1.00KB"); // Edge case for exact KB
+        assert_eq!(format_size(1536), "1.50KB"); // Middle case for KB
+        assert_eq!(format_size(1048576), "1.00MB"); // Exact MB
+        assert_eq!(format_size(1572864), "1.50MB"); // Middle case for MB
+        assert_eq!(format_size(1073741824), "1.00GB"); // Exact GB
+        assert_eq!(format_size(1610612736), "1.50GB"); // Middle case for GB
+        assert_eq!(format_size(1099511627776), "1.00TB"); // Exact TB
+        assert_eq!(format_size(1649267441664), "1.50TB"); // Middle case for TB
     }
 
     // Test for `read_patterns` function
