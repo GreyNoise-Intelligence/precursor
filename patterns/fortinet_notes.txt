@@ -1,0 +1,20 @@
+/config/ URL prefixes:
+/web-proxy/ subpaths:
+/web-proxy/enable: Enable the web proxy feature.
+/web-proxy/disable: Disable the web proxy feature.
+/web-proxy/settings: Access and configure web proxy settings.
+/web-proxy/cache: Manage the web proxy cache.
+/web-proxy/authentication: Configure user authentication for the web proxy.
+/webfilter/ subpaths:
+/webfilter/profiles: Manage web filter profiles.
+/webfilter/categories: Configure web filter categories and their associated actions.
+/webfilter/exceptions: Define exceptions to web filter policies for specific URLs or IP addresses.
+/webfilter/monitor: View real-time web filter logs and statistics.
+/config/ subpaths:
+/config/system: Access and configure general system settings.
+/config/network: Manage network-related settings, such as interfaces, routing, and DNS.
+/config/firewall: Configure firewall policies, NAT, and port forwarding.
+/config/vpn: Set up and manage VPN connections.
+/config/wireless: Configure wireless network settings (if applicable).
+
+/api/v2/cmdb/system/admin/admin

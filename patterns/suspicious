@@ -34,3 +34,4 @@
 (?s)(?<curl>.*curl.*)
 (?s)(?<orf_udp>.*orf;cd.*)
 (?s)(?<httpx>.*httpx.*)
+(?s)(?<loopback>.*?:localhost|127(?:\.[0-9]+){0,2}\.[0-9]+$|^(?:0*\:)*?:?0*1)
