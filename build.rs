@@ -7,7 +7,7 @@ fn main() {
 ///
 /// The main reason for this is to enable long path support on Windows. This
 /// still, I believe, requires enabling long path support in the registry. But
-/// if that's enabled, then this will let ripgrep use C:\... style paths that
+/// if that's enabled, then this will let precursor use C:\... style paths that
 /// are longer than 260 characters.
 fn set_windows_exe_options() {
     static MANIFEST: &str = "pkg/windows/Manifest.xml";

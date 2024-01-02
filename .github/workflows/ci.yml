@@ -78,6 +78,13 @@ jobs:
         run: |
           ci/ubuntu-install-packages
 
+      - name: Install packages (Windows GNU)
+        if: matrix.os == 'windows-2022' && matrix.rust == 'nightly-x86_64-gnu'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: mingw32
+          pacboy: openssl:p
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
