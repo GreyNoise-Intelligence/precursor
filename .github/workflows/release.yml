@@ -193,50 +193,50 @@ jobs:
           cp {README.md,COPYING,UNLICENSE,LICENSE-MIT} "$ARCHIVE"/
           cp CHANGELOG.md "$ARCHIVE"/doc/
 
-      - name: Generate man page and completions (no emulation)
-        if: matrix.qemu == ''
-        shell: bash
-        run: |
-          "$BIN" --version
-          "$BIN" --generate complete-bash > "$ARCHIVE/complete/precursor.bash"
-          "$BIN" --generate complete-fish > "$ARCHIVE/complete/precursor.fish"
-          "$BIN" --generate complete-powershell > "$ARCHIVE/complete/_precursor.ps1"
-          "$BIN" --generate complete-zsh > "$ARCHIVE/complete/_precursor"
-          "$BIN" --generate man > "$ARCHIVE/doc/precursor.1"
+      #- name: Generate man page and completions (no emulation)
+      #  if: matrix.qemu == ''
+      #  shell: bash
+      #  run: |
+      #    "$BIN" --version
+      #    "$BIN" --generate complete-bash > "$ARCHIVE/complete/precursor.bash"
+      #    "$BIN" --generate complete-fish > "$ARCHIVE/complete/precursor.fish"
+      #    "$BIN" --generate complete-powershell > "$ARCHIVE/complete/_precursor.ps1"
+      #    "$BIN" --generate complete-zsh > "$ARCHIVE/complete/_precursor"
+      #    "$BIN" --generate man > "$ARCHIVE/doc/precursor.1"
 
-      - name: Generate man page and completions (emulation)
-        if: matrix.qemu != ''
-        shell: bash
-        run: |
-          docker run --rm -v \
-            "$PWD/target:/target:Z" \
-            "rustembedded/cross:${{ matrix.target }}" \
-            "${{ matrix.qemu }}" "/$BIN" --version
-          docker run --rm -v \
-            "$PWD/target:/target:Z" \
-            "rustembedded/cross:${{ matrix.target }}" \
-            "${{ matrix.qemu }}" "/$BIN" \
-              --generate complete-bash > "$ARCHIVE/complete/precursor.bash"
-          docker run --rm -v \
-            "$PWD/target:/target:Z" \
-            "rustembedded/cross:${{ matrix.target }}" \
-            "${{ matrix.qemu }}" "/$BIN" \
-              --generate complete-fish > "$ARCHIVE/complete/precursor.fish"
-          docker run --rm -v \
-            "$PWD/target:/target:Z" \
-            "rustembedded/cross:${{ matrix.target }}" \
-            "${{ matrix.qemu }}" "/$BIN" \
-              --generate complete-powershell > "$ARCHIVE/complete/_precursor.ps1"
-          docker run --rm -v \
-            "$PWD/target:/target:Z" \
-            "rustembedded/cross:${{ matrix.target }}" \
-            "${{ matrix.qemu }}" "/$BIN" \
-              --generate complete-zsh > "$ARCHIVE/complete/_precursor"
-          docker run --rm -v \
-            "$PWD/target:/target:Z" \
-            "rustembedded/cross:${{ matrix.target }}" \
-            "${{ matrix.qemu }}" "/$BIN" \
-              --generate man > "$ARCHIVE/doc/precursor.1"
+      #- name: Generate man page and completions (emulation)
+      #  if: matrix.qemu != ''
+      #  shell: bash
+      #  run: |
+      #    docker run --rm -v \
+      #      "$PWD/target:/target:Z" \
+      #      "rustembedded/cross:${{ matrix.target }}" \
+      #      "${{ matrix.qemu }}" "/$BIN" --version
+      #    docker run --rm -v \
+      #      "$PWD/target:/target:Z" \
+      #      "rustembedded/cross:${{ matrix.target }}" \
+      #      "${{ matrix.qemu }}" "/$BIN" \
+      #        --generate complete-bash > "$ARCHIVE/complete/precursor.bash"
+      #    docker run --rm -v \
+      #      "$PWD/target:/target:Z" \
+      #      "rustembedded/cross:${{ matrix.target }}" \
+      #      "${{ matrix.qemu }}" "/$BIN" \
+      #        --generate complete-fish > "$ARCHIVE/complete/precursor.fish"
+      #    docker run --rm -v \
+      #      "$PWD/target:/target:Z" \
+      #      "rustembedded/cross:${{ matrix.target }}" \
+      #      "${{ matrix.qemu }}" "/$BIN" \
+      #        --generate complete-powershell > "$ARCHIVE/complete/_precursor.ps1"
+      #    docker run --rm -v \
+      #      "$PWD/target:/target:Z" \
+      #      "rustembedded/cross:${{ matrix.target }}" \
+      #      "${{ matrix.qemu }}" "/$BIN" \
+      #        --generate complete-zsh > "$ARCHIVE/complete/_precursor"
+      #    docker run --rm -v \
+      #      "$PWD/target:/target:Z" \
+      #      "rustembedded/cross:${{ matrix.target }}" \
+      #      "${{ matrix.qemu }}" "/$BIN" \
+      #        --generate man > "$ARCHIVE/doc/precursor.1"
 
       - name: Build archive (Windows)
         shell: bash
