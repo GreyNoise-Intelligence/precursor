@@ -315,17 +315,17 @@ jobs:
           mkdir -p "$dir"
           echo "DEPLOY_DIR=$dir" >> $GITHUB_ENV
 
-      - name: Generate man page
-        shell: bash
-        run: |
-          "$BIN" --generate man > "$DEPLOY_DIR/precursor.1"
+      #- name: Generate man page
+      #  shell: bash
+      #  run: |
+      #    "$BIN" --generate man > "$DEPLOY_DIR/precursor.1"
 
-      - name: Generate shell completions
-        shell: bash
-        run: |
-          "$BIN" --generate complete-bash > "$DEPLOY_DIR/precursor.bash"
-          "$BIN" --generate complete-fish > "$DEPLOY_DIR/precursor.fish"
-          "$BIN" --generate complete-zsh > "$DEPLOY_DIR/_precursor"
+      #- name: Generate shell completions
+      #  shell: bash
+      #  run: |
+      #    "$BIN" --generate complete-bash > "$DEPLOY_DIR/precursor.bash"
+      #    "$BIN" --generate complete-fish > "$DEPLOY_DIR/precursor.fish"
+      #    "$BIN" --generate complete-zsh > "$DEPLOY_DIR/_precursor"
 
       - name: Build release binary
         shell: bash
